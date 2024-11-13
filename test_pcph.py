@@ -55,26 +55,25 @@ def generate_pcph_original(
     indices = torch.arange(1, max_n_harmonics + 1, device=device).reshape(1, -1, 1)
     harmonic_f0 = f0 * indices
 
-    # Compute harmonic mask
-    harmonic_mask = harmonic_f0 <= (sample_rate / 2.0)
-    harmonic_mask = torch.repeat_interleave(harmonic_mask, hop_length, dim=2)
-
-    # Compute harmonic amplitude
-    harmonic_amplitude = vuv * power_factor * torch.sqrt(2.0 / n_harmonics)
-    harmocic_amplitude = torch.repeat_interleave(harmonic_amplitude, hop_length, dim=2)
-
-    # Generate sinusoids
-    f0 = torch.repeat_interleave(f0, hop_length, dim=2)
-    radious = f0.to(torch.float64) / sample_rate
+    # Pre-allocate expanded f0 and compute phases
+    f0_expanded = torch.repeat_interleave(f0, hop_length, dim=2)
+    radious = (f0_expanded.to(torch.float64) / sample_rate).contiguous()
     if random_init_phase:
         radious[..., 0] += torch.rand((1, 1), device=device)
-    radious = torch.cumsum(radious, dim=2)
-    harmonic_phase = 2.0 * torch.pi * radious * indices
+    radious.cumsum_(dim=2)  # In-place cumsum
+    harmonic_phase = 2.0 * np.pi * radious * indices
+    
+    # Generate sinusoids with combined mask and amplitude
     harmonics = torch.sin(harmonic_phase).to(torch.float32)
-
-    # Multiply coefficients to the harmonic signal
-    harmonics = harmonic_mask * harmonics
-    harmonics = harmocic_amplitude * torch.sum(harmonics, dim=1, keepdim=True)
+    
+    # Combine mask and amplitude calculations
+    mask_amp = (harmonic_f0 <= (sample_rate / 2.0)).to(torch.float32)
+    mask_amp *= (vuv * power_factor * torch.sqrt(2.0 / n_harmonics))
+    mask_amp = torch.repeat_interleave(mask_amp, hop_length, dim=2)
+    
+    # Apply mask and sum
+    harmonics.mul_(mask_amp)
+    harmonics = harmonics.sum(dim=1, keepdim=True)
 
     return harmonics + noise
 
