@@ -177,8 +177,8 @@ class TestPCPHGenerator(unittest.TestCase):
         batch_size, frames = 2, 30
         f0 = self.generate_test_f0(batch_size, frames)
         
-        for impl in [generate_pcph_original, generate_pcph_optimized]:
-            with self.subTest(implementation=impl.__name__):
+        for impl, name in ((generate_pcph_original, "original"), (generate_pcph_optimized, "optimized")):
+            with self.subTest(implementation=name):
                 output = impl(f0, self.hop_length, self.sample_rate)
                 expected_shape = (batch_size, 1, frames * self.hop_length)
                 self.assertEqual(output.shape, expected_shape)
@@ -188,8 +188,8 @@ class TestPCPHGenerator(unittest.TestCase):
         batch_size, frames = 2, 30
         f0 = torch.zeros((batch_size, 1, frames), device=self.device)
         
-        for impl in [generate_pcph_original, generate_pcph_optimized]:
-            with self.subTest(implementation=impl.__name__):
+        for impl, name in ((generate_pcph_original, "original"), (generate_pcph_optimized, "optimized")):
+            with self.subTest(implementation=name):
                 output = impl(f0, self.hop_length, self.sample_rate)
                 # Should return noise only
                 self.assertTrue(torch.abs(output).mean() < 0.1)
