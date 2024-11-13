@@ -88,78 +88,75 @@ def generate_pcph_optimized(
 ) -> Tensor:  # Shape: (batch, 1, frames * hop_length)
     """
     Generate pseudo-constant-power harmonic waveforms based on input F0 sequences.
-    The spectral envelope of harmonics is designed to have flat spectral envelopes.
+    Optimized version with improved memory efficiency and numerical stability.
 
-    Shape:
+    Shape annotations:
         - f0: (batch, 1, frames)
         - Output: (batch, 1, frames * hop_length)
         
-        Internal shapes:
+        Key internal tensors:
         - noise: (batch, 1, frames * hop_length)
         - vuv: (batch, 1, frames)
-        - n_harmonics: (batch, 1, frames)
-        - indices: (1, max_n_harmonics, 1)
-        - harmonic_f0: (batch, max_n_harmonics, frames)
-        - harmonic_mask: (batch, max_n_harmonics, frames)
-        - harmonic_amplitude: (batch, 1, frames)
+        - harmonic_f0: (batch, max_harmonics, frames)
         - phase_cumsum: (batch, 1, frames * hop_length)
-        - harmonics: (batch, max_n_harmonics, frames * hop_length)
-
-    Args:
-        f0 (Tensor): F0 sequences with shape (batch, 1, frames)
-        hop_length (int): Hop length of the F0 sequence
-        sample_rate (int): Sampling frequency of the waveform in Hz
-        noise_amplitude (float, optional): Amplitude of the noise component. Default: 0.01
-        random_init_phase (bool, optional): Whether to initialize phases randomly. Default: True
-        power_factor (float, optional): Factor to control the power of harmonics. Default: 0.1
-
-    Returns:
-        Tensor: Generated harmonic waveform with shape (batch, 1, frames * hop_length)
+        - harmonics: (batch, max_harmonics, frames * hop_length)
     """
     batch, _, frames = f0.size()
     device = f0.device
-    nyquist = sample_rate * 0.5
-
-    noise = noise_amplitude * torch.randn((batch, 1, frames * hop_length), device=device)
+    dtype = torch.float32
     
-    # Early return for all-zero F0
+    # Constants
+    TWO_PI = 2.0 * torch.pi
+    NYQUIST = sample_rate * 0.5
+    INV_SAMPLE_RATE = 1.0 / sample_rate
+    
+    # Generate noise component with optional early return
+    noise = noise_amplitude * torch.randn((batch, 1, frames * hop_length), 
+                                        device=device, dtype=dtype)
     if torch.all(f0 == 0.0):
         return noise
 
-    # Voice/unvoiced flag and harmonic calculations
+    # Voice/unvoiced detection and harmonic limit calculation
     vuv = f0 > 0.0  # (batch, 1, frames)
     min_f0 = torch.min(f0[vuv]).item()
-    max_harmonics = int(nyquist / min_f0)
+    max_harmonics = min(int(NYQUIST / min_f0), 100)  # Limit max harmonics
     
-    # Pre-compute indices once - (1, max_harmonics, 1)
-    indices = torch.arange(1, max_harmonics + 1, device=device).reshape(1, -1, 1)
+    # Pre-compute harmonics and masks efficiently
+    indices = torch.arange(1, max_harmonics + 1, device=device, dtype=dtype)
+    indices = indices.reshape(1, -1, 1)  # (1, max_harmonics, 1)
     
-    # Compute harmonics and mask in one step - (batch, max_harmonics, frames)
-    harmonic_f0 = f0 * indices
-    harmonic_mask = (harmonic_f0 <= nyquist) & vuv.expand(-1, max_harmonics, -1)
+    # Compute harmonic frequencies and mask in single operation
+    harmonic_f0 = f0 * indices  # (batch, max_harmonics, frames)
+    harmonic_mask = ((harmonic_f0 <= NYQUIST) & 
+                    vuv.expand(-1, max_harmonics, -1))  # (batch, max_harmonics, frames)
     
-    # Compute amplitude factors - (batch, 1, frames)
-    n_harmonics = torch.where(vuv, nyquist / f0, torch.ones_like(f0))
-    harmonic_amplitude = (power_factor * torch.sqrt(2.0 / n_harmonics)) * vuv
+    # Compute amplitude factors more efficiently
+    n_harmonics = torch.where(
+        vuv, 
+        NYQUIST / torch.clamp(f0, min=min_f0),  # Avoid division by zero
+        torch.ones_like(f0)
+    )
+    amplitude = (power_factor * torch.sqrt(2.0 / n_harmonics)) * vuv
     
-    # Phase computation with improved numerical stability
-    f0_expanded = torch.repeat_interleave(f0, hop_length, dim=2)  # (batch, 1, frames * hop_length)
-    phase_cumsum = (f0_expanded / sample_rate).cumsum(dim=2)  # (batch, 1, frames * hop_length)
+    # Phase computation with better numerical stability
+    f0_expanded = torch.repeat_interleave(f0, hop_length, dim=2)
+    phase_base = (f0_expanded * INV_SAMPLE_RATE).cumsum(dim=2)
     
     if random_init_phase:
-        phase_cumsum = phase_cumsum + torch.rand((batch, 1, 1), device=device)
+        phase_base = phase_base + torch.rand((batch, 1, 1), 
+                                           device=device, dtype=dtype)
     
-    # Generate all harmonics at once with broadcasting
-    phase_harmonics = 2.0 * torch.pi * phase_cumsum * indices  # (batch, max_harmonics, frames * hop_length)
-    harmonics = torch.sin(phase_harmonics.to(torch.float32))
+    # Generate harmonics with optimized memory usage
+    phase_harmonics = TWO_PI * phase_base * indices
+    harmonics = torch.sin(phase_harmonics)
     
-    # Apply mask and amplitude in frequency domain
-    harmonic_mask = torch.repeat_interleave(harmonic_mask.to(harmonics.dtype), hop_length, dim=2)
-    harmonics = harmonics * harmonic_mask
+    # Efficient mask and amplitude application
+    harmonic_mask = torch.repeat_interleave(harmonic_mask, hop_length, dim=2)
+    harmonics = harmonics * harmonic_mask.to(dtype)
     
-    # Sum harmonics and apply amplitude
-    harmonic_amplitude = torch.repeat_interleave(harmonic_amplitude, hop_length, dim=2)
-    harmonics = harmonic_amplitude * harmonics.sum(dim=1, keepdim=True)
+    # Final summation and amplitude application
+    amplitude = torch.repeat_interleave(amplitude, hop_length, dim=2)
+    harmonics = amplitude * harmonics.sum(dim=1, keepdim=True)
     
     return harmonics + noise
 
