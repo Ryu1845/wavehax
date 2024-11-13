@@ -200,7 +200,6 @@ def benchmark_implementation(
     hop_length: int,
     sample_rate: int,
     n_runs: int = 5,
-    n_warmup: int = 3
 ) -> float:
     """Benchmark a single implementation.
     
@@ -210,13 +209,7 @@ def benchmark_implementation(
         hop_length: Hop length parameter
         sample_rate: Sample rate parameter
         n_runs: Number of timed runs to average over
-        n_warmup: Number of warmup runs before timing
     """
-    # Warmup runs
-    for _ in range(n_warmup):
-        _ = impl(f0, hop_length, sample_rate)
-        torch.cuda.synchronize() if torch.cuda.is_available() else None
-    
     # Actual benchmark runs
     torch.cuda.synchronize() if torch.cuda.is_available() else None
     start_time = time.perf_counter()
@@ -270,32 +263,32 @@ def run_benchmarks(
             key = f"{batch_size}_{frames}"
             print(f"\nBenchmarking batch_size={batch_size}, frames={frames}")
             
-            # Generate test data
-            actual_frames = frames + torch.randint(-5, 6, (1,)).item()  # ±5 frames variation
-            f0 = torch.zeros((batch_size, 1, actual_frames), device=device)
-            mid_point = min(actual_frames - 10, actual_frames // 2)
-            f0[:, 0, mid_point:mid_point+10] = torch.linspace(100, 400, 10, device=device)
-            
             # Benchmark both implementations
             for name, impl in [
                 ('original', generate_pcph_original),
                 ('optimized', generate_pcph_optimized)
             ]:
+                torch.manual_seed(42)
                 # Collect multiple timing measurements
                 times = []
                 for i in range(n_iterations):
-                    # No warmup needed here since we did it above
-                    torch.cuda.synchronize() if torch.cuda.is_available() else None
-                    start_time = time.perf_counter()
-                    
+                    time_taken = 0.0
                     for _ in range(n_runs):
+                        # Generate test data
+                        actual_frames = frames + torch.randint(-5, 6, (1,)).item()  # ±5 frames variation
+                        f0 = torch.randn((batch_size, 1, actual_frames), device=device)*200+300
+                        f0[f0<100]=0.0
+
+                        torch.cuda.synchronize() if torch.cuda.is_available() else None
+                        start_time = time.perf_counter()
+
                         _ = impl(f0, 256, 44100)
                         torch.cuda.synchronize() if torch.cuda.is_available() else None
-                    
-                    end_time = time.perf_counter()
-                    time_taken = (end_time - start_time) / n_runs
+
+                        end_time = time.perf_counter()
+                        time_taken += (end_time - start_time) / n_runs
                     times.append(time_taken)
-                    print(f"{name} iteration {i+1}/{n_iterations}: {time_taken:.4f} seconds")
+                    print(f"{name} frames:{actual_frames} iteration {i+1}/{n_iterations}: {time_taken:.4f} seconds")
                 
                 times = np.array(times)
                 
@@ -309,7 +302,7 @@ def run_benchmarks(
                     'mean': mean_time,
                     'std': std_time,
                     'ci_95': ci_95,
-                    'actual_frames': actual_frames
+                    'actual_frames': frames
                 }
                 
                 print(f"{name} statistics:")
