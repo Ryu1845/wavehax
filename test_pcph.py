@@ -251,13 +251,26 @@ def run_benchmarks(
         'optimized': {'times': {}, 'stats': {}}
     }
     
+    # Do warmup runs once per batch size
     for batch_size in batch_sizes:
+        print(f"\nWarming up for batch_size={batch_size}")
+        # Use the smallest frame length for warmup
+        frames = frame_lengths[0]
+        f0_warmup = torch.zeros((batch_size, 1, frames), device=device)
+        f0_warmup[:, 0, 10:20] = torch.linspace(100, 400, 10, device=device)
+        
+        for impl in [generate_pcph_original, generate_pcph_optimized]:
+            # Warmup runs
+            for _ in range(3):  # 3 warmup runs
+                _ = impl(f0_warmup, 256, 44100)
+                torch.cuda.synchronize() if torch.cuda.is_available() else None
+    
+        # Actual benchmarks for this batch size
         for frames in frame_lengths:
             key = f"{batch_size}_{frames}"
             print(f"\nBenchmarking batch_size={batch_size}, frames={frames}")
             
             # Generate test data
-            # Add small random variation to frame size
             actual_frames = frames + torch.randint(-5, 6, (1,)).item()  # ±5 frames variation
             f0 = torch.zeros((batch_size, 1, actual_frames), device=device)
             mid_point = min(actual_frames - 10, actual_frames // 2)
@@ -271,9 +284,16 @@ def run_benchmarks(
                 # Collect multiple timing measurements
                 times = []
                 for i in range(n_iterations):
-                    time_taken = benchmark_implementation(
-                        impl, f0, 256, 44100, n_runs=n_runs
-                    )
+                    # No warmup needed here since we did it above
+                    torch.cuda.synchronize() if torch.cuda.is_available() else None
+                    start_time = time.perf_counter()
+                    
+                    for _ in range(n_runs):
+                        _ = impl(f0, 256, 44100)
+                        torch.cuda.synchronize() if torch.cuda.is_available() else None
+                    
+                    end_time = time.perf_counter()
+                    time_taken = (end_time - start_time) / n_runs
                     times.append(time_taken)
                     print(f"{name} iteration {i+1}/{n_iterations}: {time_taken:.4f} seconds")
                 
