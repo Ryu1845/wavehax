@@ -199,14 +199,30 @@ def benchmark_implementation(
     f0: torch.Tensor,
     hop_length: int,
     sample_rate: int,
-    n_runs: int = 5
+    n_runs: int = 5,
+    n_warmup: int = 3
 ) -> float:
-    """Benchmark a single implementation."""
+    """Benchmark a single implementation.
+    
+    Args:
+        impl: The implementation function to benchmark
+        f0: Input F0 tensor
+        hop_length: Hop length parameter
+        sample_rate: Sample rate parameter
+        n_runs: Number of timed runs to average over
+        n_warmup: Number of warmup runs before timing
+    """
+    # Warmup runs
+    for _ in range(n_warmup):
+        _ = impl(f0, hop_length, sample_rate)
+        torch.cuda.synchronize() if torch.cuda.is_available() else None
+    
+    # Actual benchmark runs
     torch.cuda.synchronize() if torch.cuda.is_available() else None
     start_time = time.perf_counter()
     
     for _ in range(n_runs):
-        output = impl(f0, hop_length, sample_rate)
+        _ = impl(f0, hop_length, sample_rate)
         torch.cuda.synchronize() if torch.cuda.is_available() else None
     
     end_time = time.perf_counter()
