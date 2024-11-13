@@ -37,11 +37,11 @@ def generate_pcph_original(
     Returns:
         Tensor: Generated harmonic waveform with shape (batch, 1, frames * hop_length).
     """
-    batch, _, frames = f0.size()
+    batch, _, frames = f0.size()  # f0: (batch, 1, frames)
     device = f0.device
     noise = noise_amplitude * torch.randn(
         (batch, 1, frames * hop_length), device=device
-    )
+    )  # noise: (batch, 1, frames * hop_length)
     if torch.all(f0 == 0.0):
         return noise
 
@@ -79,28 +79,43 @@ def generate_pcph_original(
 
 @torch.jit.script
 def generate_pcph_optimized(
-    f0: Tensor,
+    f0: Tensor,  # Shape: (batch, 1, frames)
     hop_length: int,
     sample_rate: int,
     noise_amplitude: float = 0.01,
     random_init_phase: bool = True,
     power_factor: float = 0.1,
-) -> Tensor:
+) -> Tensor:  # Shape: (batch, 1, frames * hop_length)
     """
     Generate pseudo-constant-power harmonic waveforms based on input F0 sequences.
     The spectral envelope of harmonics is designed to have flat spectral envelopes.
 
+    Shape:
+        - f0: (batch, 1, frames)
+        - Output: (batch, 1, frames * hop_length)
+        
+        Internal shapes:
+        - noise: (batch, 1, frames * hop_length)
+        - vuv: (batch, 1, frames)
+        - n_harmonics: (batch, 1, frames)
+        - indices: (1, max_n_harmonics, 1)
+        - harmonic_f0: (batch, max_n_harmonics, frames)
+        - harmonic_mask: (batch, max_n_harmonics, frames * hop_length)
+        - harmonic_amplitude: (batch, 1, frames * hop_length)
+        - radious: (batch, 1, frames * hop_length)
+        - harmonic_phase: (batch, max_n_harmonics, frames * hop_length)
+        - harmonics: (batch, max_n_harmonics, frames * hop_length)
+
     Args:
-        f0 (Tensor): F0 sequences with shape (batch, 1, frames).
-        hop_length (int): Hop length of the F0 sequence.
-        sample_rate (int): Sampling frequency of the waveform in Hz.
-        noise_amplitude (float, optional): Amplitude of the noise component (default: 0.01).
-        random_init_phase (bool, optional): Whether to initialize phases randomly (default: True).
-        power_factor (float, optional): Factor to control the power of harmonics (default: 0.1).
-        max_frequency (float, optional): Maximum frequency to define the number of harmonics (default: None).
+        f0 (Tensor): F0 sequences with shape (batch, 1, frames)
+        hop_length (int): Hop length of the F0 sequence
+        sample_rate (int): Sampling frequency of the waveform in Hz
+        noise_amplitude (float, optional): Amplitude of the noise component. Default: 0.01
+        random_init_phase (bool, optional): Whether to initialize phases randomly. Default: True
+        power_factor (float, optional): Factor to control the power of harmonics. Default: 0.1
 
     Returns:
-        Tensor: Generated harmonic waveform with shape (batch, 1, frames * hop_length).
+        Tensor: Generated harmonic waveform with shape (batch, 1, frames * hop_length)
     """
     batch, _, frames = f0.size()
     device = f0.device
@@ -110,36 +125,36 @@ def generate_pcph_optimized(
     if torch.all(f0 == 0.0):
         return noise
 
-    vuv = f0 > 0
+    vuv = f0 > 0  # vuv: (batch, 1, frames)
     min_f0_value = torch.min(f0[f0 > 0]).item()
     max_frequency = sample_rate / 2
     max_n_harmonics = int(max_frequency / min_f0_value)
-    n_harmonics = torch.ones_like(f0, dtype=torch.float)
+    n_harmonics = torch.ones_like(f0, dtype=torch.float)  # n_harmonics: (batch, 1, frames)
     n_harmonics[vuv] = sample_rate / 2.0 / f0[vuv]
 
-    indices = torch.arange(1, max_n_harmonics + 1, device=device).reshape(1, -1, 1)
-    harmonic_f0 = f0 * indices
+    indices = torch.arange(1, max_n_harmonics + 1, device=device).reshape(1, -1, 1)  # indices: (1, max_n_harmonics, 1)
+    harmonic_f0 = f0 * indices  # harmonic_f0: (batch, max_n_harmonics, frames)
 
     # Compute harmonic mask
-    harmonic_mask = harmonic_f0 <= (sample_rate / 2.0)
-    harmonic_mask = torch.repeat_interleave(harmonic_mask, hop_length, dim=2)
+    harmonic_mask = harmonic_f0 <= (sample_rate / 2.0)  # harmonic_mask: (batch, max_n_harmonics, frames)
+    harmonic_mask = torch.repeat_interleave(harmonic_mask, hop_length, dim=2)  # harmonic_mask: (batch, max_n_harmonics, frames * hop_length)
 
     # Compute harmonic amplitude
-    harmonic_amplitude = vuv * power_factor * torch.sqrt(2.0 / n_harmonics)
-    harmocic_amplitude = torch.repeat_interleave(harmonic_amplitude, hop_length, dim=2)
+    harmonic_amplitude = vuv * power_factor * torch.sqrt(2.0 / n_harmonics)  # harmonic_amplitude: (batch, 1, frames)
+    harmocic_amplitude = torch.repeat_interleave(harmonic_amplitude, hop_length, dim=2)  # harmonic_amplitude: (batch, 1, frames * hop_length)
 
     # Generate sinusoids
-    f0 = torch.repeat_interleave(f0, hop_length, dim=2)
-    radious = f0.to(torch.float64) / sample_rate
+    f0 = torch.repeat_interleave(f0, hop_length, dim=2)  # f0: (batch, 1, frames * hop_length)
+    radious = f0.to(torch.float64) / sample_rate  # radious: (batch, 1, frames * hop_length)
     if random_init_phase:
         radious[..., 0] += torch.rand((1, 1), device=device)
-    radious = torch.cumsum(radious, dim=2)
-    harmonic_phase = 2.0 * torch.pi * radious * indices
-    harmonics = torch.sin(harmonic_phase).to(torch.float32)
+    radious = torch.cumsum(radious, dim=2)  # radious: (batch, 1, frames * hop_length)
+    harmonic_phase = 2.0 * torch.pi * radious * indices  # harmonic_phase: (batch, max_n_harmonics, frames * hop_length)
+    harmonics = torch.sin(harmonic_phase).to(torch.float32)  # harmonics: (batch, max_n_harmonics, frames * hop_length)
 
     # Multiply coefficients to the harmonic signal
-    harmonics = harmonic_mask * harmonics
-    harmonics = harmocic_amplitude * torch.sum(harmonics, dim=1, keepdim=True)
+    harmonics = harmonic_mask * harmonics  # harmonics: (batch, max_n_harmonics, frames * hop_length)
+    harmonics = harmocic_amplitude * torch.sum(harmonics, dim=1, keepdim=True)  # harmonics: (batch, 1, frames * hop_length)
 
     return harmonics + noise
 
