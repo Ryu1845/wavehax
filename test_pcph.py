@@ -257,8 +257,11 @@ def run_benchmarks(
             print(f"\nBenchmarking batch_size={batch_size}, frames={frames}")
             
             # Generate test data
-            f0 = torch.zeros((batch_size, 1, frames), device=device)
-            f0[:, 0, 10:20] = torch.linspace(100, 400, 10, device=device)
+            # Add small random variation to frame size
+            actual_frames = frames + torch.randint(-5, 6, (1,)).item()  # ±5 frames variation
+            f0 = torch.zeros((batch_size, 1, actual_frames), device=device)
+            mid_point = min(actual_frames - 10, actual_frames // 2)
+            f0[:, 0, mid_point:mid_point+10] = torch.linspace(100, 400, 10, device=device)
             
             # Benchmark both implementations
             for name, impl in [
@@ -285,7 +288,8 @@ def run_benchmarks(
                 results[name]['stats'][key] = {
                     'mean': mean_time,
                     'std': std_time,
-                    'ci_95': ci_95
+                    'ci_95': ci_95,
+                    'actual_frames': actual_frames
                 }
                 
                 print(f"{name} statistics:")
@@ -318,7 +322,8 @@ def plot_benchmark_results(results: dict, batch_sizes: list[int], frame_lengths:
             optimized_times.append(results['optimized']['stats'][key]['mean'])
             optimized_errors.append(results['optimized']['stats'][key]['ci_95'])
             
-            labels.append(f"B{batch_size}\nF{frames}")
+            actual_frames = results['original']['stats'][key].get('actual_frames', frames)
+            labels.append(f"B{batch_size}\nF{actual_frames}")
     
     plt.bar(x - width/2, original_times, width, label='Original',
             yerr=original_errors, capsize=5)
