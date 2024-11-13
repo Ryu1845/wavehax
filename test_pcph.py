@@ -77,16 +77,14 @@ def generate_pcph_original(
 
     return harmonics + noise
 
+@torch.jit.script
 def generate_pcph_optimized(
     f0: Tensor,
     hop_length: int,
     sample_rate: int,
-    noise_amplitude: Optional[float] = 0.01,
-    random_init_phase: Optional[bool] = True,
-    power_factor: Optional[float] = 0.1,
-    max_frequency: Optional[float] = None,
-    *args,
-    **kwargs,
+    noise_amplitude: float = 0.01,
+    random_init_phase: bool = True,
+    power_factor: float = 0.1,
 ) -> Tensor:
     """
     Generate pseudo-constant-power harmonic waveforms based on input F0 sequences.
@@ -114,7 +112,7 @@ def generate_pcph_optimized(
 
     vuv = f0 > 0
     min_f0_value = torch.min(f0[f0 > 0]).item()
-    max_frequency = max_frequency if max_frequency is not None else sample_rate / 2
+    max_frequency = sample_rate / 2
     max_n_harmonics = int(max_frequency / min_f0_value)
     n_harmonics = torch.ones_like(f0, dtype=torch.float)
     n_harmonics[vuv] = sample_rate / 2.0 / f0[vuv]
