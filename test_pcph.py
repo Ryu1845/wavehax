@@ -231,17 +231,29 @@ def benchmark_implementation(
 def run_benchmarks(
     batch_sizes: list[int],
     frame_lengths: list[int],
-    n_runs: int = 5
+    n_runs: int = 5,
+    n_iterations: int = 10
 ) -> dict:
-    """Run comprehensive benchmarks for both implementations."""
+    """Run comprehensive benchmarks for both implementations with statistical analysis.
+    
+    Args:
+        batch_sizes: List of batch sizes to test
+        frame_lengths: List of frame lengths to test
+        n_runs: Number of runs per timing measurement
+        n_iterations: Number of iterations to gather statistics
+    
+    Returns:
+        Dictionary containing timing statistics for each configuration
+    """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     results = {
-        'original': {},
-        'optimized': {}
+        'original': {'times': {}, 'stats': {}},
+        'optimized': {'times': {}, 'stats': {}}
     }
     
     for batch_size in batch_sizes:
         for frames in frame_lengths:
+            key = f"{batch_size}_{frames}"
             print(f"\nBenchmarking batch_size={batch_size}, frames={frames}")
             
             # Generate test data
@@ -253,38 +265,65 @@ def run_benchmarks(
                 ('original', generate_pcph_original),
                 ('optimized', generate_pcph_optimized)
             ]:
-                # Warmup run
-                impl(f0, 256, 44100)
+                # Collect multiple timing measurements
+                times = []
+                for i in range(n_iterations):
+                    time_taken = benchmark_implementation(
+                        impl, f0, 256, 44100, n_runs=n_runs
+                    )
+                    times.append(time_taken)
+                    print(f"{name} iteration {i+1}/{n_iterations}: {time_taken:.4f} seconds")
                 
-                # Actual benchmark
-                time_taken = benchmark_implementation(
-                    impl, f0, 256, 44100, n_runs=n_runs
-                )
-                results[name][f"{batch_size}_{frames}"] = time_taken
-                print(f"{name}: {time_taken:.4f} seconds")
+                times = np.array(times)
+                
+                # Calculate statistics
+                mean_time = np.mean(times)
+                std_time = np.std(times)
+                ci_95 = 1.96 * std_time / np.sqrt(n_iterations)  # 95% confidence interval
+                
+                results[name]['times'][key] = times
+                results[name]['stats'][key] = {
+                    'mean': mean_time,
+                    'std': std_time,
+                    'ci_95': ci_95
+                }
+                
+                print(f"{name} statistics:")
+                print(f"  Mean: {mean_time:.4f} ± {ci_95:.4f} seconds")
+                print(f"  Std:  {std_time:.4f} seconds")
     
     return results
 
 def plot_benchmark_results(results: dict, batch_sizes: list[int], frame_lengths: list[int]):
-    """Plot benchmark results."""
+    """Plot benchmark results with error bars."""
     plt.figure(figsize=(12, 6))
     
     x = np.arange(len(batch_sizes) * len(frame_lengths))
     width = 0.35
     
     original_times = []
+    original_errors = []
     optimized_times = []
+    optimized_errors = []
     labels = []
     
     for batch_size in batch_sizes:
         for frames in frame_lengths:
             key = f"{batch_size}_{frames}"
-            original_times.append(results['original'][key])
-            optimized_times.append(results['optimized'][key])
+            
+            # Get mean times and confidence intervals
+            original_times.append(results['original']['stats'][key]['mean'])
+            original_errors.append(results['original']['stats'][key]['ci_95'])
+            
+            optimized_times.append(results['optimized']['stats'][key]['mean'])
+            optimized_errors.append(results['optimized']['stats'][key]['ci_95'])
+            
             labels.append(f"B{batch_size}\nF{frames}")
     
-    plt.bar(x - width/2, original_times, width, label='Original')
-    plt.bar(x + width/2, optimized_times, width, label='Optimized')
+    plt.bar(x - width/2, original_times, width, label='Original',
+            yerr=original_errors, capsize=5)
+    plt.bar(x + width/2, optimized_times, width, label='Optimized',
+            yerr=optimized_errors, capsize=5)
     
     plt.xlabel('Batch Size (B) and Frame Length (F)')
     plt.ylabel('Time (seconds)')
@@ -316,11 +355,31 @@ if __name__ == '__main__':
     # Print speedup statistics
     print("\nSpeedup Statistics:")
     speedups = []
-    for key in results['original'].keys():
-        speedup = results['original'][key] / results['optimized'][key]
-        speedups.append(speedup)
-        print(f"Configuration {key}: {speedup:.2f}x speedup")
+    speedup_cis = []  # Confidence intervals for speedups
     
-    print(f"\nAverage speedup: {np.mean(speedups):.2f}x")
+    for key in results['original']['stats'].keys():
+        orig_stats = results['original']['stats'][key]
+        opt_stats = results['optimized']['stats'][key]
+        
+        # Calculate speedup and its uncertainty
+        speedup = orig_stats['mean'] / opt_stats['mean']
+        
+        # Error propagation for division
+        rel_error = np.sqrt(
+            (orig_stats['std']/orig_stats['mean'])**2 + 
+            (opt_stats['std']/opt_stats['mean'])**2
+        )
+        speedup_ci = speedup * rel_error * 1.96  # 95% CI
+        
+        speedups.append(speedup)
+        speedup_cis.append(speedup_ci)
+        
+        print(f"Configuration {key}: {speedup:.2f}x ± {speedup_ci:.2f}x speedup")
+    
+    mean_speedup = np.mean(speedups)
+    std_speedup = np.std(speedups)
+    ci_speedup = 1.96 * std_speedup / np.sqrt(len(speedups))
+    
+    print(f"\nOverall speedup: {mean_speedup:.2f}x ± {ci_speedup:.2f}x")
     print(f"Maximum speedup: {np.max(speedups):.2f}x")
     print(f"Minimum speedup: {np.min(speedups):.2f}x")
