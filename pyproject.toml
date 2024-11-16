@@ -17,6 +17,7 @@ dependencies = [
     "hydra-core>=1.2",
     "librosa",
     "matplotlib",
+    "nnAudio",
     "protobuf",
     "pyloudnorm",
     "pysptk",
