@@ -11,3 +11,5 @@ __pycache__
 exp
 local
 events.out.tfevents.*
+.aider*
+.env
