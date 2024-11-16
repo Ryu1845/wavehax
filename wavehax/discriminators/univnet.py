@@ -23,10 +23,6 @@ from torch import Tensor
 
 from wavehax.modules import spectral_norm, weight_norm
 
-# A logger for this file
-logger = getLogger(__name__)
-
-
 class PeriodDiscriminator(nn.Module):
     """
     HiFiGAN's period discriminator module.
