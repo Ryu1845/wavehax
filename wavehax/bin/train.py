@@ -18,6 +18,7 @@ from collections import defaultdict
 from logging import getLogger
 from typing import Dict, List, Tuple
 
+import heavyball
 import hydra
 import librosa.display
 import matplotlib
@@ -32,6 +33,9 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 
 from wavehax.datasets import AudioFeatDataset
+
+# Enable pytorch optimizations
+heavyball.utils.set_torch()
 
 # Set to avoid matplotlib error in CLI environment
 matplotlib.use("Agg")
