@@ -28,6 +28,7 @@ from hydra.utils import instantiate, to_absolute_path
 from joblib import load
 from numpy import ndarray
 from omegaconf import DictConfig, OmegaConf
+import wandb
 from tensorboardX import SummaryWriter
 from torch import Tensor
 from torch.utils.data import DataLoader
@@ -401,6 +402,7 @@ class Trainer:
             self.steps,
             sample_rate,
         )
+        wandb.log({"real/audio": wandb.Audio(audio, sample_rate=sample_rate)}, step=self.steps)
 
         # Visualize and save the fake waveform
         audio = y_.view(-1).cpu().numpy()
@@ -435,6 +437,7 @@ class Trainer:
             self.steps,
             sample_rate,
         )
+        wandb.log({"fake/audio": wandb.Audio(audio, sample_rate=sample_rate)}, step=self.steps)
 
         # Visualize and save the prior waveform (for debug)
         if p is not None:
@@ -472,13 +475,14 @@ class Trainer:
             )
 
     def _write_to_tensorboard(self, loss: Dict) -> None:
-        """Write training loss metrics to TensorBoard.
+        """Write training loss metrics to TensorBoard and WandB.
 
         Args:
             loss (Dict): Dictionary containing loss metrics.
         """
         for key, value in loss.items():
             self.writer.add_scalar(key, value, self.steps)
+            wandb.log({key: value}, step=self.steps)
 
     def _check_save_interval(self) -> None:
         """Check if it's time to save a checkpoint."""
@@ -616,6 +620,13 @@ def main(cfg: DictConfig) -> None:
     with open(os.path.join(cfg.out_dir, "config.yaml"), "w") as f:
         f.write(OmegaConf.to_yaml(cfg))
     logger.info(OmegaConf.to_yaml(cfg))
+
+    # Initialize wandb
+    wandb.init(
+        project="wavehax",
+        name=os.path.basename(cfg.out_dir),
+        config=OmegaConf.to_container(cfg, resolve=True),
+    )
 
     # Load scaler for normalizing features
     scaler = load(to_absolute_path(cfg.data.stats))
@@ -763,6 +774,8 @@ def main(cfg: DictConfig) -> None:
             )
         )
         logger.info(f"Successfully saved checkpoint @ {trainer.steps}steps.")
+    finally:
+        wandb.finish()
 
 
 if __name__ == "__main__":
