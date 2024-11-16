@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "wavehax"
+dynamic = ["version"]
+description = "Wavehax official implementation"
+readme = "README.md"
+license = ""
+authors = [
+    { name = "Reo Yoneyama", email = "yoneyama.reo@g.sp.m.is.nagoya-u.ac.jp" },
+    { name = "Ryu1845", email = "ryu@tpgjbo.xyz" }
+]
+dependencies = [
+    "h5py",
+    "hydra-core>=1.2",
+    "librosa",
+    "matplotlib",
+    "protobuf",
+    "pyloudnorm",
+    "pysptk",
+    "pyworld",
+    "PyYAML",
+    "setuptools",
+    "soundfile",
+    "tensorboardX",
+    "torch>=1.9.0",
+    "torchaudio>=0.8.1",
+    "torchprofile",
+    "tqdm",
+    "transformers",
+    "wheel",
+]
+
+[project.scripts]
+wavehax-compute-statistics = "wavehax.bin.compute_statistics:main"
+wavehax-decode = "wavehax.bin.decode:main"
+wavehax-extract-features = "wavehax.bin.extract_features:main"
+wavehax-profile = "wavehax.bin.profile:main"
+wavehax-train = "wavehax.bin.train:main"
+
+[project.urls]
+Homepage = "http://github.com/chomeyama/wavehax"
+
+[tool.hatch.version]
+path = "wavehax/__init__.py"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/wavehax",
+]
