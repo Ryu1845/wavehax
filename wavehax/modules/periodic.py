@@ -198,6 +198,90 @@ def generate_pcph(
     return harmonics + noise
 
 
+@torch.jit.script
+def generate_pcph_optimized(
+    f0: Tensor,
+    hop_length: int,
+    sample_rate: int,
+    noise_amplitude: float = 0.01,
+    random_init_phase: bool = True,
+    power_factor: float = 0.1,
+) -> Tensor:
+    """
+    Generate pseudo-constant-power harmonic waveforms based on input F0 sequences.
+    The spectral envelope of harmonics is designed to have flat spectral envelopes.
+
+    Args:
+        f0 (Tensor): F0 sequences with shape (batch, 1, frames).
+        hop_length (int): Hop length of the F0 sequence.
+        sample_rate (int): Sampling frequency of the waveform in Hz.
+        noise_amplitude (float, optional): Amplitude of the noise component (default: 0.01).
+        random_init_phase (bool, optional): Whether to initialize phases randomly (default: True).
+        power_factor (float, optional): Factor to control the power of harmonics (default: 0.1).
+
+    Returns:
+        Tensor: Generated harmonic waveform with shape (batch, 1, frames * hop_length).
+    """
+    batch, _, frames = f0.size()
+    device = f0.device
+    dtype = torch.float32
+    
+    # Constants
+    TWO_PI = 2.0 * torch.pi
+    NYQUIST = sample_rate * 0.5
+    INV_SAMPLE_RATE = 1.0 / sample_rate
+    
+    # Generate noise component with optional early return
+    noise = noise_amplitude * torch.randn((batch, 1, frames * hop_length), 
+                                        device=device, dtype=dtype)
+    if torch.all(f0 == 0.0):
+        return noise
+
+    # Voice/unvoiced detection and harmonic limit calculation
+    vuv = f0 > 0.0  # (batch, 1, frames)
+    min_f0 = torch.min(f0[vuv]).item()
+    max_harmonics = min(int(NYQUIST / min_f0), 100)  # Limit max harmonics
+    
+    # Pre-compute harmonics and masks efficiently
+    indices = torch.arange(1, max_harmonics + 1, device=device, dtype=dtype)
+    indices = indices.reshape(1, -1, 1)  # (1, max_harmonics, 1)
+    
+    # Compute harmonic frequencies and mask in single operation
+    harmonic_f0 = f0 * indices  # (batch, max_harmonics, frames)
+    harmonic_mask = ((harmonic_f0 <= NYQUIST) & 
+                    vuv.expand(-1, max_harmonics, -1))  # (batch, max_harmonics, frames)
+    
+    # Compute amplitude factors more efficiently
+    n_harmonics = torch.where(
+        vuv, 
+        NYQUIST / torch.clamp(f0, min=min_f0),  # Avoid division by zero
+        torch.ones_like(f0)
+    )
+    amplitude = (power_factor * torch.sqrt(2.0 / n_harmonics)) * vuv
+    
+    # Phase computation with better numerical stability
+    f0_expanded = torch.repeat_interleave(f0, hop_length, dim=2)
+    phase_base = (f0_expanded * INV_SAMPLE_RATE).cumsum(dim=2)
+    
+    if random_init_phase:
+        phase_base = phase_base + torch.rand((batch, 1, 1), 
+                                           device=device, dtype=dtype)
+    
+    # Generate harmonics with optimized memory usage
+    phase_harmonics = TWO_PI * phase_base * indices
+    harmonics = torch.sin(phase_harmonics)
+    
+    # Efficient mask and amplitude application
+    harmonic_mask = torch.repeat_interleave(harmonic_mask, hop_length, dim=2)
+    harmonics = harmonics * harmonic_mask.to(dtype)
+    
+    # Final summation and amplitude application
+    amplitude = torch.repeat_interleave(amplitude, hop_length, dim=2)
+    harmonics = amplitude * harmonics.sum(dim=1, keepdim=True)
+    
+    return harmonics + noise
+
+
 def generate_pcph_linear_decay(
     f0: Tensor,
     hop_length: int,
