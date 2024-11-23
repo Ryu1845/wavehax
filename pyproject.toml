@@ -13,12 +13,14 @@ authors = [
     { name = "Ryu1845", email = "ryu@tpgjbo.xyz" }
 ]
 dependencies = [
+    "einops",
     "h5py",
+    "heavyball",
     "hydra-core>=1.2",
     "librosa",
     "matplotlib",
     "nnAudio",
-    "numba>=60",
+    "numba>=0.0.60",
     "protobuf",
     "pyloudnorm",
     "pysptk",
@@ -32,6 +34,7 @@ dependencies = [
     "torchprofile",
     "tqdm",
     "transformers",
+    "wandb",
     "wheel",
 ]
 

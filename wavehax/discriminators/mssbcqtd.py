@@ -8,6 +8,7 @@ import torch.nn.functional as F
 import torch.nn as nn
 from torch import nn
 from torch.nn.utils.parametrizations import weight_norm
+from torch import Tensor
 
 from einops import rearrange
 import torchaudio.transforms as T
@@ -17,6 +18,15 @@ from nnAudio import features
 from .univnet import MultiPeriodDiscriminator, MultiResolutionDiscriminator
 
 LRELU_SLOPE = 0.1
+
+
+def get_2d_padding(
+    kernel_size: Tuple[int, int], dilation: Tuple[int, int] = (1, 1)
+):
+    return (
+        ((kernel_size[0] - 1) * dilation[0]) // 2,
+        ((kernel_size[1] - 1) * dilation[1]) // 2,
+    )
 
 
 class DiscriminatorCQT(nn.Module):
@@ -168,7 +178,7 @@ class MultiScaleSubbandCQTDiscriminator(nn.Module):
         sample_rate: int,
         hop_lengths: list[int], 
         n_octaves: list[int], 
-        bins_per_octave: list[int],
+        bins_per_octaves: list[int],
     ):
         super(MultiScaleSubbandCQTDiscriminator, self).__init__()
 
@@ -191,15 +201,15 @@ class MultiScaleSubbandCQTDiscriminator(nn.Module):
         )
 
     def forward(self, y):
-        y_d = []
-        fmap = []
+        y_ds = []
+        fmaps = []
 
         for disc in self.discriminators:
-            y_d, fmap_d = disc(y)
-            y_d.append(y_d)
-            fmap.append(fmap_d)
+            y_d, fmap = disc(y)
+            y_ds.append(y_d)
+            fmaps.extend(fmap)
 
-        return y_d, fmap
+        return y_ds, fmaps
 
 
 class MultiDiscriminator(nn.Module):

@@ -1,0 +1,164 @@
+out_dir: logs
+seed: 0
+generator:
+  _target_: wavehax.generators.WavehaxGenerator
+  in_channels: 100
+  channels: 16
+  mult_channels: 3
+  kernel_size:
+  - 13
+  - 7
+  num_blocks: 8
+  n_fft: 480
+  hop_length: 240
+  sample_rate: 24000
+  prior_type: pcph
+  drop_prob: 0.0
+  use_logmag_phase: false
+discriminator:
+  _target_: wavehax.discriminators.MultiDiscriminator
+  periods:
+  - 2
+  - 3
+  - 5
+  - 7
+  - 11
+  period_discriminator_params:
+    channels: 32
+    kernel_sizes:
+    - 5
+    - 3
+    downsample_scales:
+    - 3
+    - 3
+    - 3
+    - 3
+    - 1
+    max_downsample_channels: 1024
+    use_weight_norm: true
+    use_spectral_norm: false
+  fft_sizes:
+  - 1024
+  - 2048
+  - 512
+  hop_sizes:
+  - 256
+  - 512
+  - 128
+  win_lengths:
+  - 1024
+  - 2048
+  - 512
+  spectral_discriminator_params:
+    window: hann_window
+    channels: 32
+    kernel_sizes:
+    - - 7
+      - 5
+    - - 5
+      - 3
+    - - 5
+      - 3
+    - - 3
+      - 3
+    - - 3
+      - 3
+    - - 3
+      - 3
+    strides:
+    - - 2
+      - 2
+    - - 2
+      - 1
+    - - 2
+      - 2
+    - - 2
+      - 1
+    - - 2
+      - 2
+    - - 1
+      - 1
+    use_weight_norm: true
+  cqt_discriminator_params:
+    hop_lengths:
+    - 512
+    - 256
+    - 256
+    filters: 32
+    sample_rate: 24000
+    max_filters: 1024
+    filters_scale: 1
+    dilations:
+    - 1
+    - 2
+    - 4
+    in_channels: 1
+    out_channels: 1
+    n_octaves:
+    - 9
+    - 9
+    - 9
+    bins_per_octaves:
+    - 24
+    - 36
+    - 48
+train:
+  discriminator_train_start_steps: 0
+  train_max_steps: 1000000
+  save_interval_steps: 100000
+  eval_interval_steps: 2000
+  log_interval_steps: 200
+  distributed_training: false
+  resume: null
+  load_only_params: false
+  lambda_mel: 45.0
+  lambda_reg: 0.0
+  lambda_phase: 0.0
+  lambda_adv: 1.0
+  lambda_fm: 2.0
+  mel_loss:
+    _target_: wavehax.losses.MelSpectralLoss
+    n_fft: 1024
+    hop_length: 256
+    sample_rate: 24000
+    n_mels: 100
+  adv_loss:
+    _target_: wavehax.losses.AdversarialLoss
+    average_by_discriminators: false
+    loss_type: hinge
+  fm_loss:
+    _target_: wavehax.losses.FeatureMatchingLoss
+    average_by_layers: false
+  generator_optimizer:
+    _target_: heavyball.PrecondSchedulePaLMForeachSOAP
+    lr: 0.0002
+  generator_scheduler:
+    _target_: transformers.get_cosine_schedule_with_warmup
+    num_warmup_steps: 0
+    num_training_steps: ${train.train_max_steps}
+  generator_grad_norm: 10
+  discriminator_optimizer:
+    _target_: heavyball.PrecondSchedulePaLMForeachSOAP
+    lr: 0.0002
+  discriminator_scheduler:
+    _target_: transformers.get_cosine_schedule_with_warmup
+    num_warmup_steps: 0
+    num_training_steps: ${train.train_max_steps}
+  discriminator_grad_norm: 10
+data:
+  train_audio: data/scp/train_no_dev.scp
+  train_feat: data/list/train_no_dev.list
+  valid_audio: data/scp/dev.scp
+  valid_feat: data/list/dev.list
+  eval_audio: data/scp/eval_mid.scp
+  eval_feat: data/list/eval_mid.list
+  stats: data/stats/train_no_dev.joblib
+  feat_names:
+  - mel
+  use_continuous_f0: false
+  batch_max_length: 7680
+  batch_size: 16
+  num_workers: 1
+  pin_memory: true
+  remove_short_samples: true
+  allow_cache: false

@@ -8,6 +8,10 @@ __pycache__
 *.png
 *.out
 *.log
+*.lab
+*.txt
+*.csv
+egs/jvs/wandb/
 exp
 local
 events.out.tfevents.*
